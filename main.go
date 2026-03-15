@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -14,65 +13,14 @@ import (
 )
 
 // ------------------------------
-// Thread-safe totals map
+// Thread-safe totals map (in-memory only)
 // ------------------------------
 var totals = struct {
 	sync.RWMutex
 	Data map[string]int
 }{Data: make(map[string]int)}
 
-// JSON file path on Render persistent disk
-const dataFile = "/mnt/data/totals.json"
-
-// ------------------------------
-// Load totals from JSON file
-// ------------------------------
-func loadTotals() {
-	// Check if file exists, create if not
-	if _, err := os.Stat(dataFile); os.IsNotExist(err) {
-		os.WriteFile(dataFile, []byte("{}"), 0644)
-	}
-
-	file, err := os.Open(dataFile)
-	if err != nil {
-		log.Println("Cannot open totals.json:", err)
-		return
-	}
-	defer file.Close()
-
-	// Decode JSON into totals.Data map
-	err = json.NewDecoder(file).Decode(&totals.Data)
-	if err != nil {
-		log.Println("Cannot decode JSON:", err)
-	}
-}
-
-// ------------------------------
-// Save totals to JSON file
-// ------------------------------
-func saveTotals() {
-	totals.RLock()
-	defer totals.RUnlock()
-
-	file, err := os.Create(dataFile)
-	if err != nil {
-		log.Println("Cannot create totals.json:", err)
-		return
-	}
-	defer file.Close()
-
-	err = json.NewEncoder(file).Encode(totals.Data)
-	if err != nil {
-		log.Println("Cannot encode JSON:", err)
-	}
-}
-
 func main() {
-	// ------------------------------
-	// Load existing totals on startup
-	// ------------------------------
-	loadTotals()
-
 	// ------------------------------
 	// Telegram Bot setup
 	// ------------------------------
@@ -100,7 +48,12 @@ func main() {
 	// ------------------------------
 	r.POST("/webhook", func(c *gin.Context) {
 		var update tgbotapi.Update
-		c.BindJSON(&update)
+
+		if err := c.ShouldBindJSON(&update); err != nil {
+			log.Println("Bad JSON from Telegram:", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+			return
+		}
 
 		if update.Message != nil {
 			text := update.Message.Text
@@ -159,9 +112,6 @@ func main() {
 			totals.Data[tag] += amount
 			newTotal := totals.Data[tag]
 			totals.Unlock()
-
-			// Save updated totals to JSON
-			saveTotals()
 
 			bot.Send(tgbotapi.NewMessage(chatID, "Updated "+tag+" total : "+strconv.Itoa(newTotal)))
 		}
