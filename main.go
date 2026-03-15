@@ -53,6 +53,9 @@ func main() {
 
 	r := gin.Default()
 
+	r.GET("/", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "running"})
+	})
 	r.POST("/webhook", func(c *gin.Context) {
 
 		var update tgbotapi.Update
